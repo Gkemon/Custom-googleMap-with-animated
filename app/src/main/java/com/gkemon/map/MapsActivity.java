@@ -1,13 +1,17 @@
 package com.gkemon.map;
 
 import android.Manifest;
+import android.animation.IntEvaluator;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -22,6 +26,7 @@ import android.os.Bundle;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AlertDialog;
 import android.util.Log;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.Toast;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
@@ -36,6 +41,8 @@ import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.BitmapDescriptor;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.CameraPosition;
+import com.google.android.gms.maps.model.GroundOverlay;
+import com.google.android.gms.maps.model.GroundOverlayOptions;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
@@ -46,12 +53,12 @@ class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
 
 
     private Marker currentLocationMarker;
+    ValueAnimator valueAnimator = new ValueAnimator();
     private boolean firstTimeFlag = true;
     private GoogleMap mMap;
     private Location currentLocation;
     private FusedLocationProviderClient fusedLocationProviderClient;
-
-
+    private GroundOverlay circle;
     @Override
     protected
     void onCreate(Bundle savedInstanceState) {
@@ -82,6 +89,54 @@ class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
     void onMapReady(GoogleMap googleMap) {
 
         mMap = googleMap;
+
+
+        mMap.setOnCameraIdleListener(new GoogleMap.OnCameraIdleListener() {
+            @Override
+            public
+            void onCameraIdle() {
+
+                if(currentLocationMarker!=null){
+                    currentLocationMarker.setIcon(bitmapDescriptorFromVector(MapsActivity.this,R.drawable.ic_parking_markup));
+                }
+
+
+
+
+            }
+        });
+
+
+        //TODO: This is for actually Scroll listen
+        mMap.setOnCameraMoveStartedListener(new GoogleMap.OnCameraMoveStartedListener() {
+            @Override
+            public void onCameraMoveStarted(int reason) {
+                if (reason ==REASON_GESTURE) {
+                    //"The user gestured on the map."
+
+
+
+                    if(currentLocationMarker!=null){
+                        currentLocationMarker.setIcon(bitmapDescriptorFromVector(MapsActivity.this,R.drawable.ic_my_location_black_24dp));
+                    }
+
+
+
+
+                } else if (reason ==REASON_API_ANIMATION) {
+
+
+
+                    //"The user tapped something on the marker."
+
+                } else if (reason ==REASON_DEVELOPER_ANIMATION) {
+                   // "The app moved the camera."
+
+                }
+            }
+
+
+        });
 
 
         if (!GPShelper.canAccessLocation(this)) {
@@ -126,24 +181,40 @@ class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
             @Override
             public
             void onLocationChanged(Location location) {
+
+
                 LatLng toLocation = new LatLng(location.getLatitude(), location.getLongitude());
+
+
                 if(currentLocationMarker!=null){
                     currentLocationMarker.setPosition(toLocation);
                 }
                 else {
+
                     currentLocationMarker = mMap.addMarker(new MarkerOptions().icon(bitmapDescriptorFromVector(MapsActivity.this,R.drawable.ic_parking_markup)).position(toLocation));
 
                 }
 
-                MarkerAnimation.animateMarkerToGB(currentLocationMarker, toLocation,  new LatLngInterpolator.Spherical());
+
+                if(circle!=null)
+                {
+                    circle.setPosition(toLocation);
+                }
+                else {
+                    getCircle(toLocation);
+                }
+
+
+
 
             }
 
             @Override
             public
             void onStatusChanged(String provider, int status, Bundle extras) {
-                Log.d("GK"," onStatusChanged ");
+                Log.d("GK"," onStatusChanged "+provider);
             }
+
 
             @Override
             public
@@ -160,13 +231,33 @@ class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
      };
 
 
-
         locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER, 1000, 1, locationListener);
+                LocationManager.GPS_PROVIDER, 0, 0, locationListener);
+                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0, locationListener);
 
 
 
 
+    }
+
+    void setUpValueAnimator(){
+        valueAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        valueAnimator.setRepeatMode(ValueAnimator.RESTART);
+        valueAnimator.setIntValues(0, 40);
+        valueAnimator.setDuration(2000);
+        valueAnimator.setEvaluator(new IntEvaluator());
+        valueAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
+        valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator valueAnimator) {
+                float animatedFraction = valueAnimator.getAnimatedFraction();
+
+                if(circle!=null)circle.setDimensions(animatedFraction * 40 * 2);
+
+            }
+        });
+
+        valueAnimator.start();
     }
 
     private final LocationCallback mLocationCallback = new LocationCallback() {
@@ -180,8 +271,9 @@ class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
             if (firstTimeFlag && mMap != null) {
                 animateCamera(currentLocation);
                 firstTimeFlag = false;
+                showMarker(currentLocation);
             }
-            showMarker(currentLocation);
+
         }
     };
 
@@ -196,15 +288,21 @@ class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
         return new CameraPosition.Builder().target(latLng).zoom(16).build();
     }
 
-    private void showMarker(@NonNull Location currentLocation) {
+    public void showMarker(@NonNull Location currentLocation) {
         LatLng latLng = new LatLng(currentLocation.getLatitude(), currentLocation.getLongitude());
         if (currentLocationMarker == null)
         {
             currentLocationMarker = mMap.addMarker(new MarkerOptions().icon(bitmapDescriptorFromVector(MapsActivity.this,R.drawable.ic_parking_markup)).position(latLng));
 
-        }
-            MarkerAnimation.animateMarkerToGB(currentLocationMarker, latLng,  new LatLngInterpolator.Spherical());
 
+        }
+        else {
+                currentLocationMarker.setPosition(latLng);
+             }
+
+Log.d("GK","SHOW MARKER");
+        getCircle(latLng);
+        setUpValueAnimator();
 
     }
 
@@ -225,6 +323,40 @@ class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
         super.onStop();
         if (fusedLocationProviderClient != null)
             fusedLocationProviderClient.removeLocationUpdates(mLocationCallback);
+    }
+
+
+
+    void getCircle(LatLng latLng) {
+
+        // The drawable to use for the circle
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.OVAL);
+        d.setSize(500, 500);
+        d.setColor(0x555751FF);
+        d.setStroke(5, Color.TRANSPARENT);
+
+        Bitmap bitmap = Bitmap.createBitmap(d.getIntrinsicWidth()
+                , d.getIntrinsicHeight()
+                , Bitmap.Config.ARGB_8888);
+
+        // Convert the drawable to bitmap
+        Canvas canvas = new Canvas(bitmap);
+        d.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+        d.draw(canvas);
+
+        // Radius of the circle
+        final int radius = 40;
+
+        // Add the circle to the
+
+
+        if(circle==null)
+         circle = mMap.addGroundOverlay(new GroundOverlayOptions()
+                .position(latLng, 2 * radius).image(BitmapDescriptorFactory.fromBitmap(bitmap)));
+
+
+
     }
 
     @Override
